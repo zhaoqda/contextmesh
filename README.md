@@ -1,28 +1,73 @@
-# ContextMesh · 需求变更影响检查
+# ContextMesh
 
-**“这份清单能提测了吗？”** 让 WorkBuddy 拿现有用例和已确认的需求对一遍，指出该改的那一行，并给出可以直接采用的修订。
+**团队里的 AI 助手，共用一份有出处、分人群的项目决定。** 成员 A 确认需求，成员 B 在另一个会话检索。两人的项目凭据不同，查询的是同一个服务；换机器无需复制决定文件。
 
-### 看一个 30 秒的例子
+## 看它解决哪一次返工
 
-企业试点刚从短信改成邮箱登录，公众注册沿用短信。清单里四条用例都提到了短信。一次有用的审查应当给出下面的判断（预期示例）。
+最初所有用户都用短信登录。产品经理后来只把企业试点改成邮箱。测试人员接手前，两条验收用例都引用初版决定。用 ContextMesh 核对引用，会得到两个不同的结果：
 
-| 用例 | 判断 | 下一步 |
-|---|---|---|
-| T-17 企业试点接受短信 | 修改 | 把“有效短信验证码登录成功”改为“有效邮箱验证码登录成功”。依据 D-02。 |
-| T-18 公众注册接受短信 | 保留 | D-01 对公众注册仍有效。 |
-| T-19 欢迎页展示短信入口 | 待确认 | 这个欢迎页面向试点还是公众？ |
-| T-20 企业试点拒绝短信 | 保留 | 这是检查旧方式不能单独登录的反向用例，符合 D-02。 |
+| 用例 | 适用对象 | 服务返回 | 接手者看到的当前依据 |
+|---|---|---|---|
+| T-17 | 企业试点 | needs_review | 查到邮箱规则和新评审来源 |
+| T-18 | 公众注册 | current | 初版短信规则仍有效 |
 
-### 在 WorkBuddy 中试用
+### 本机运行真实双人演示
 
-1. 下载 [Skill 安装包](dist/contextmesh-decisions.zip)，在「专家·技能·连接器 → 技能 → 添加技能」上传本地包。[官方说明](https://cloud.tencent.com/document/product/1831/134432)
-2. 解压 [试点项目](dist/contextmesh-demo.zip)，选中里面的 login 目录，使用可读取本地文件的任务模式。
-3. 新会话只问：**“看看 acceptance.md，这份清单能提测了吗？”** 检查助手是否引用相关决定并指出上面四种情况。如果客户端没有选中技能，显式选择「需求变更影响检查」重试。自然触发率与回答质量需要真实客户端验证。
+在仓库根目录使用 Python 3.10+。以下是 macOS / Linux 命令，Windows 可将 .venv/bin/python 替换为 .venv/Scripts/python.exe。
 
-换成自己的项目时，把已确认的决定放在 context-decisions/，清单使用日常 Markdown 即可。助手也可以根据对话拟出决定，在用户确认后保存。两人试用时，让两位成员打开同一个已同步的共享项目目录；共享依赖现有文件权限。
+~~~sh
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python examples/demo.py
+~~~
 
-### 实现与范围
+演示使用临时 SQLite 库、真实 HTTP MCP 服务和两位成员的独立客户端连接。它会先发布旧版本，再只修改一个人群，最后打印两条用例的核对结果。运行结束即清理演示数据。服务端无需模型 API Key。
 
-v0.2 通过 Skill 指导助手逐条审查，包含一个可选的 Python 3 只读定位脚本，用来列出带行号的候选条目。脚本只做字面匹配，最终是否过时由助手结合范围、时间和否定语义判断。没有后台监听或独立服务器，审查在会话中执行。欢迎提交脱敏的误判、漏判用例，附原始清单、期望修订及实际引用。
+## 给团队开一个持久项目
 
-[Skill 原文](skills/contextmesh-decisions/SKILL.md) · [示例文件](examples/login/) · [后续产品提案](docs/proposal.html) · [Apache-2.0 许可证](LICENSE)
+在同一目录运行以下命令。首次授权时创建项目。每条 grant 输出一枚成员专属 token，在客户端的凭据配置中使用。对同名成员再次 grant 会轮换 token；revoke 会使该身份的凭据失效。
+
+~~~sh
+.venv/bin/python contextmesh.py grant login alice
+.venv/bin/python contextmesh.py grant login bob
+.venv/bin/python contextmesh.py serve
+~~~
+
+默认地址为 http://127.0.0.1:8787/mcp ，数据保存在当前目录的 contextmesh.sqlite3。可以在子命令前用 --db 指定持久文件路径。所有进程使用同一个数据库文件。另一台电脑可通过 SSH 端口转发访问同一服务（在成员电脑执行，替换 team-host 为实际 SSH 主机）：
+
+~~~sh
+ssh -N -L 8787:127.0.0.1:8787 team-host
+~~~
+
+也可以在服务前配置带 TLS 的反向代理，转发至回环地址并传递认证头；若使用 SDK 的本地主机校验，转发给后端的 Host 设为 127.0.0.1:8787。团队成员通过 HTTPS 端点连接。项目成员可以发布和更新本项目的共享结论，只有发布者可以撤回自己的记录；撤回从生效查询剔除，项目历史保留。
+
+## 接入 WorkBuddy
+
+1. 在两位成员的客户端安装 [WorkBuddy Skill](dist/contextmesh-decisions.zip)，为普通任务提供何时查、何时写、如何引用的说明。
+2. 在「专家·技能·连接器 → 连接器 → 自定义连接器」添加 Streamable HTTP MCP 服务。按 [配置示例](integrations/workbuddy/mcp.example.json) 填写端点和各自的 Authorization 头，在任务中启用该连接器。配置中的地址适合服务同机运行或已建立上述隧道的桌面端；云端执行需使用可达的 HTTPS 地址。[WorkBuddy 官方连接器说明](https://open.workbuddy.cn/docs/connector)
+3. A 在自己的会话中输入：“发布到 login 项目：登录验证，企业试点和公众注册均使用短信验证码，来源是初版评审。” 核对共享摘要后确认，再输入：“企业试点改邮箱，公众不变，来源是周三评审。”
+4. B 新建会话输入：“按项目决定，分别给企业试点和公众注册写登录验收用例，附当前决定 ID 和出处。” 想检查旧用例时给出原决定 ID 和人群即可。自然触发依赖客户端；也可显式选中技能和连接器。
+
+本版验证了官方 MCP Python SDK 客户端的端到端读写，WorkBuddy 桌面客户端尚待真人联调。原来的[本地清单示例](dist/contextmesh-demo.zip)仍可在无连接器时作为文件模式试用；文件模式使用各自已有的文件权限。
+
+## 已实现的 MCP 工具
+
+| 工具 | 行为 |
+|---|---|
+| publish_context | 发布确认的主题、结论、来源和明确的人群；替代时携带旧 ID，只更新指定人群。与现行版本不符时拒绝覆盖。 |
+| search_context | 按子串和可选的人群过滤当前决定。每项的 active_audience 表示当前生效人群；audiences 记录发布时范围。 |
+| check_reference | 按旧 ID 和人群判定当前、待复核、人群不符、无当前规则或未知引用。 |
+| recent_context | 分页读取项目历史、发布人、替代关系、撤回标记及当前有效人群。 |
+| withdraw_context | 撤回自己的一条决定。旧版不会自动复活。 |
+
+每枚 token 只绑定一位成员及一个项目，数据库只保存 token 摘要。人群标签是业务规则的适用范围；项目成员均能读取项目内的共享记录。首版采用发布即生效、精确人群标签和文本检索。跨项目搜索、后台订阅通知、语义搜索与自主任务分派属于后续设计。
+
+## 验证与设计
+
+~~~sh
+.venv/bin/python -m unittest discover -s tests -v
+~~~
+
+测试覆盖跨身份读写、项目隔离、并发替代冲突、重启恢复、引用失效、撤回及成员撤权。
+
+[图解产品提案](docs/proposal.html) · [Skill 源码](skills/contextmesh-decisions/SKILL.md) · [Apache-2.0 许可证](LICENSE)
